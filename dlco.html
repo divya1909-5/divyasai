@@ -35,8 +35,8 @@
             align-items: center;
         }
         .file-list li:hover {
-    color: #6fb4bf; 
-}
+            color: #6fb4bf; 
+        }
         .delete-btn {
             background: red;
             color: white;
@@ -132,7 +132,13 @@
         function openFileInNewPage(file) {
             const blob = base64ToBlob(file.data, file.type);
             const url = URL.createObjectURL(blob);
+            
+            // Open a new tab first to avoid popup blocking
             const newWindow = window.open();
+            if (!newWindow) {
+                alert("Popup blocked! Allow popups for this site.");
+                return;
+            }
 
             if (file.type.startsWith('image/')) {
                 newWindow.document.write('<img src="' + url + '" style="width:100%; height:100%;">');
@@ -140,19 +146,25 @@
                 newWindow.document.write('<iframe width="100%" height="100%" src="' + url + '"></iframe>');
             } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || 
                        file.type === 'application/msword') {
-                const reader = new FileReader();
-                reader.onload = function(event) {
-                    const arrayBuffer = event.target.result;
-                    mammoth.convertToHtml({ arrayBuffer: arrayBuffer }).then(function(result) {
+                fetch(url)
+                    .then(response => response.arrayBuffer())
+                    .then(arrayBuffer => {
+                        return mammoth.convertToHtml({ arrayBuffer: arrayBuffer });
+                    })
+                    .then(result => {
                         newWindow.document.write('<div>' + result.value + '</div>');
-                    }).catch(function(err) {
-                        newWindow.document.write('<p>Error processing DOCX file.</p>');
+                    })
+                    .catch(err => {
+                        newWindow.document.write('<p>Error processing DOCX file. Click below to download.</p>');
+                        const downloadLink = document.createElement('a');
+                        downloadLink.href = url;
+                        downloadLink.download = file.name;
+                        downloadLink.textContent = "Download File";
+                        newWindow.document.body.appendChild(downloadLink);
                     });
-                };
-                reader.readAsArrayBuffer(blob);
             } else {
                 newWindow.document.write('<p>File type not supported for preview.</p>');
-                const downloadLink = newWindow.document.createElement('a');
+                const downloadLink = document.createElement('a');
                 downloadLink.href = url;
                 downloadLink.download = file.name;
                 downloadLink.textContent = "Download File";

@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SDS Subject Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.2/mammoth.browser.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f8f9fa;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            color: #4a148c;
+        }
+        .container {
+            margin-top: 20px;
+        }
+        .file-list {
+            list-style-type: none;
+            padding: 0;
+        }
+        .file-list li {
+            margin: 10px 0;
+            cursor: pointer;
+            background-color: #ffffff;
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .file-list li:hover {
+    color: #6fb4bf; 
+}
+        .delete-btn {
+            background: red;
+            color: white;
+            border: none;
+            padding: 5px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>SDS File Viewer</h1>
+
+    <div class="container" id="uploadSection">
+        <input type="file" id="fileInput" multiple>
+        <button onclick="uploadFiles()">Upload</button>
+        <h2>Uploaded Files</h2>
+        <ul class="file-list" id="fileList"></ul>
+    </div>
+
+    <script>
+        let db;
+
+        function initDB() {
+            const request = indexedDB.open("SDSFileStorage", 1);
+            request.onupgradeneeded = (event) => {
+                db = event.target.result;
+                db.createObjectStore("files", { keyPath: "name" });
+            };
+            request.onsuccess = (event) => {
+                db = event.target.result;
+                displayFiles();
+            };
+        }
+
+        function uploadFiles() {
+            const fileInput = document.getElementById('fileInput');
+            if (!db) {
+                console.error("Database not initialized yet!");
+                return;
+            }
+            for (let file of fileInput.files) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    const transaction = db.transaction(["files"], "readwrite");
+                    const store = transaction.objectStore("files");
+                    store.put({ name: file.name, data: event.target.result, type: file.type });
+                    transaction.oncomplete = () => displayFiles();
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function displayFiles() {
+            if (!db) {
+                console.error("Database not initialized yet!");
+                return;
+            }
+            const fileList = document.getElementById('fileList');
+            fileList.innerHTML = '';
+            const transaction = db.transaction(["files"], "readonly");
+            const store = transaction.objectStore("files");
+            const request = store.getAll();
+
+            request.onsuccess = () => {
+                request.result.forEach((file) => {
+                    const li = document.createElement('li');
+                    li.textContent = file.name;
+                    li.onclick = () => openFileInNewPage(file);
+                    
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.textContent = "Remove";
+                    deleteBtn.classList.add('delete-btn');
+                    deleteBtn.onclick = (event) => {
+                        event.stopPropagation();
+                        deleteFile(file.name);
+                    };
+
+                    li.appendChild(deleteBtn);
+                    fileList.appendChild(li);
+                });
+            };
+        }
+
+        function deleteFile(fileName) {
+            const transaction = db.transaction(["files"], "readwrite");
+            const store = transaction.objectStore("files");
+            store.delete(fileName);
+            transaction.oncomplete = () => displayFiles();
+        }
+
+        function openFileInNewPage(file) {
+            const blob = base64ToBlob(file.data, file.type);
+            const url = URL.createObjectURL(blob);
+            const newWindow = window.open();
+
+            if (file.type.startsWith('image/')) {
+                newWindow.document.write('<img src="' + url + '" style="width:100%; height:100%;">');
+            } else if (file.type === 'application/pdf') {
+                newWindow.document.write('<iframe width="100%" height="100%" src="' + url + '"></iframe>');
+            } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || 
+                       file.type === 'application/msword') {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    const arrayBuffer = event.target.result;
+                    mammoth.convertToHtml({ arrayBuffer: arrayBuffer }).then(function(result) {
+                        newWindow.document.write('<div>' + result.value + '</div>');
+                    }).catch(function(err) {
+                        newWindow.document.write('<p>Error processing DOCX file.</p>');
+                    });
+                };
+                reader.readAsArrayBuffer(blob);
+            } else {
+                newWindow.document.write('<p>File type not supported for preview.</p>');
+                const downloadLink = newWindow.document.createElement('a');
+                downloadLink.href = url;
+                downloadLink.download = file.name;
+                downloadLink.textContent = "Download File";
+                newWindow.document.body.appendChild(downloadLink);
+            }
+        }
+
+        function base64ToBlob(base64, mimeType) {
+            const byteCharacters = atob(base64.split(',')[1]);
+            const byteArrays = [];
+            for (let i = 0; i < byteCharacters.length; i += 512) {
+                const slice = byteCharacters.slice(i, i + 512);
+                const byteNumbers = new Array(slice.length);
+                for (let j = 0; j < slice.length; j++) {
+                    byteNumbers[j] = slice.charCodeAt(j);
+                }
+                byteArrays.push(new Uint8Array(byteNumbers));
+            }
+            return new Blob(byteArrays, { type: mimeType });
+        }
+
+        window.onload = initDB;
+    </script>
+</body>
+</html>
